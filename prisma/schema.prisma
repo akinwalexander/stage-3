@@ -7,6 +7,37 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// User model for authentication
+model User {
+  id           Int           @id @default(autoincrement())
+  githubId     Int           @unique @map("github_id")
+  username     String
+  email        String?
+  avatarUrl    String?       @map("avatar_url")
+  role         Role          @default(analyst)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  
+  refreshTokens RefreshToken[]
+  profiles      Profile[]     // Relation to profiles
+  
+  @@map("users")
+}
+
+// Refresh tokens for session management
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  userId    Int      @map("user_id")
+  expiresAt DateTime @map("expires_at")
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("refresh_tokens")
+}
+
 model Profile {
   id                  String   @id @db.Uuid
   name                String   @unique
@@ -18,6 +49,16 @@ model Profile {
   country_name        String
   country_probability Float
   created_at          DateTime @default(now())
-
+  createdBy           Int?     @map("created_by")  // Foreign key to User
+  userId              Int?     @map("user_id")     // Alternative name
+  
+  // Relationship to User (who created/owns this profile)
+  user                User?    @relation(fields: [userId], references: [id])
+  
   @@map("profiles")
+}
+
+enum Role {
+  admin
+  analyst
 }
