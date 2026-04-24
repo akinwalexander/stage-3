@@ -26,19 +26,27 @@ app.use('/api/profiles', profileRoutes);
 
 // 3. Health API
 app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'success', 
+  res.json({
+    status: 'success',
     db: !!process.env.DATABASE_URL,
     ui: fs.existsSync(path.join(publicPath, 'index.html'))
   });
 });
 
 // 4. UI Catch-all handler
-app.get('*', (req, res, next) => {
+app.use((req, res, next) => {
   if (req.path.startsWith('/api')) return next();
+
   const indexPath = path.join(publicPath, 'index.html');
-  if (fs.existsSync(indexPath)) return res.sendFile(indexPath);
-  res.json({ status: 'success', message: 'API is live. Dashboard loading failed.' });
+
+  if (fs.existsSync(indexPath)) {
+    return res.sendFile(indexPath);
+  }
+
+  res.json({
+    status: 'success',
+    message: 'API is live. Dashboard loading failed.'
+  });
 });
 
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
