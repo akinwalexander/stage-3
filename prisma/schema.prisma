@@ -7,54 +7,51 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// User model for authentication
 model User {
-  id           Int           @id @default(autoincrement())
-  githubId     Int           @unique @map("github_id")
-  username     String
-  email        String?
-  avatarUrl    String?       @map("avatar_url")
-  role         Role          @default(analyst)
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @updatedAt @map("updated_at")
-  
-  refreshTokens RefreshToken[]
-  profiles      Profile[]     // Relation to profiles
-  
+  id         Int      @id @default(autoincrement())
+  github_id  Int      @unique
+  username   String
+  email      String?
+  avatar_url String?
+  role       Role     @default(analyst)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  refresh_tokens RefreshToken[]
+  profiles       Profile[]
+
   @@map("users")
 }
 
-// Refresh tokens for session management
 model RefreshToken {
-  id        Int      @id @default(autoincrement())
-  token     String   @unique
-  userId    Int      @map("user_id")
-  expiresAt DateTime @map("expires_at")
-  revoked   Boolean  @default(false)
-  createdAt DateTime @default(now()) @map("created_at")
-  
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  id         Int      @id @default(autoincrement())
+  token      String   @unique
+  user_id    Int
+  expires_at DateTime
+  revoked    Boolean  @default(false)
+  created_at DateTime @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
   @@map("refresh_tokens")
 }
 
 model Profile {
-  id                  String   @id @db.Uuid
-  name                String   @unique
-  gender              String
-  gender_probability  Float
-  age                 Int
-  age_group           String
-  country_id          String   @db.VarChar(2)
-  country_name        String
-  country_probability Float
-  created_at          DateTime @default(now())
-  createdBy           Int?     @map("created_by")  // Foreign key to User
-  userId              Int?     @map("user_id")     // Alternative name
-  
-  // Relationship to User (who created/owns this profile)
-  user                User?    @relation(fields: [userId], references: [id])
-  
+  id                 String   @id @default(uuid()) @db.Uuid
+  name               String   @unique
+  gender             String
+  gender_probability Float    @default(0)
+  age                Int
+  age_group          String
+  country_id         String   @db.VarChar(2)
+  country_name       String
+  country_probability Float   @default(0)
+  created_at         DateTime @default(now())
+  updated_at         DateTime? @updatedAt
+  created_by         Int?
+
+  user User? @relation(fields: [created_by], references: [id])
+
   @@map("profiles")
 }
 

@@ -16,6 +16,7 @@ declare global {
   }
 }
 
+
 /**
  * @openapi
  * /api/profiles:
@@ -92,12 +93,12 @@ export const getAllProfiles = async (req: Request, res: Response) => {
     if (!req.user) {
       throw new AppError('Authentication required', 401);
     }
-    
+
     // Both Admin and Analyst can read profiles
     if (!['admin', 'analyst'].includes(req.user.role)) {
       throw new AppError('Access denied. Role must be admin or analyst', 403);
     }
-    
+
     const {
       gender,
       age_group,
@@ -135,7 +136,7 @@ export const getAllProfiles = async (req: Request, res: Response) => {
     if (limit && isNaN(filters.limit!)) throw new AppError('Invalid parameter type', 422);
 
     const result = await profileService.getProfiles(filters);
-    
+
     // Add metadata about the authenticated user
     res.json({
       ...result,
@@ -145,6 +146,7 @@ export const getAllProfiles = async (req: Request, res: Response) => {
       }
     });
   } catch (error) {
+     console.error('getAllProfiles error:', error);
     handleError(error, res);
   }
 };
@@ -190,12 +192,12 @@ export const searchProfiles = async (req: Request, res: Response) => {
     if (!req.user) {
       throw new AppError('Authentication required', 401);
     }
-    
+
     // Both Admin and Analyst can search profiles
     if (!['admin', 'analyst'].includes(req.user.role)) {
       throw new AppError('Access denied. Role must be admin or analyst', 403);
     }
-    
+
     const { q, page, limit } = req.query;
 
     if (!q || (q as string).trim() === '') {
@@ -219,7 +221,7 @@ export const searchProfiles = async (req: Request, res: Response) => {
     };
 
     const result = await profileService.getProfiles(filters);
-    
+
     res.json({
       ...result,
       search_query: q,
@@ -260,18 +262,18 @@ export const getProfileById = async (req: Request, res: Response) => {
     if (!req.user) {
       throw new AppError('Authentication required', 401);
     }
-    
+
     if (!['admin', 'analyst'].includes(req.user.role)) {
       throw new AppError('Access denied. Role must be admin or analyst', 403);
     }
-    
-    const { id } = req.params;
+
+    const id = req.params.id as string;
     const profile = await profileService.getProfileById(id);
-    
+
     if (!profile) {
       throw new AppError('Profile not found', 404);
     }
-    
+
     res.json({
       success: true,
       data: profile,
@@ -336,16 +338,16 @@ export const createProfile = async (req: Request, res: Response) => {
     if (!req.user) {
       throw new AppError('Authentication required', 401);
     }
-    
+
     if (req.user.role !== 'admin') {
       throw new AppError('Access denied. Only admin can create profiles', 403);
     }
-    
+
     const profile = await profileService.createProfile({
       ...req.body,
       created_by: req.user.userId
     });
-    
+
     res.status(201).json({
       success: true,
       data: profile,
@@ -387,18 +389,18 @@ export const updateProfile = async (req: Request, res: Response) => {
     if (!req.user) {
       throw new AppError('Authentication required', 401);
     }
-    
+
     if (req.user.role !== 'admin') {
       throw new AppError('Access denied. Only admin can update profiles', 403);
     }
-    
-    const { id } = req.params;
+
+    const id = req.params.id as string;
     const profile = await profileService.updateProfile(id, req.body);
-    
+
     if (!profile) {
       throw new AppError('Profile not found', 404);
     }
-    
+
     res.json({
       success: true,
       data: profile,
@@ -440,18 +442,18 @@ export const deleteProfile = async (req: Request, res: Response) => {
     if (!req.user) {
       throw new AppError('Authentication required', 401);
     }
-    
+
     if (req.user.role !== 'admin') {
       throw new AppError('Access denied. Only admin can delete profiles', 403);
     }
-    
-    const { id } = req.params;
+
+    const id = req.params.id as string;
     const deleted = await profileService.deleteProfile(id);
-    
+
     if (!deleted) {
       throw new AppError('Profile not found', 404);
     }
-    
+
     res.json({
       success: true,
       message: 'Profile deleted successfully',
@@ -491,14 +493,14 @@ export const exportProfiles = async (req: Request, res: Response) => {
     if (!req.user) {
       throw new AppError('Authentication required', 401);
     }
-    
+
     if (req.user.role !== 'admin') {
       throw new AppError('Access denied. Only admin can export profiles', 403);
     }
-    
+
     const { format = 'csv' } = req.query;
-    const data = await profileService.exportProfiles(format as string);
-    
+    const data = await profileService.exportProfiles(format as 'csv' | 'json');
+
     if (format === 'csv') {
       res.setHeader('Content-Type', 'text/csv');
       res.setHeader('Content-Disposition', 'attachment; filename=profiles.csv');
@@ -537,13 +539,13 @@ export const getProfileStats = async (req: Request, res: Response) => {
     if (!req.user) {
       throw new AppError('Authentication required', 401);
     }
-    
+
     if (!['admin', 'analyst'].includes(req.user.role)) {
       throw new AppError('Access denied. Role must be admin or analyst', 403);
     }
-    
+
     const stats = await profileService.getProfileStats();
-    
+
     res.json({
       success: true,
       data: stats,

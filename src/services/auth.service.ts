@@ -14,18 +14,18 @@ export interface UserData {
 
 export const findOrCreateUser = async (userData: UserData) => {
   const existingUser = await prisma.user.findUnique({
-    where: { githubId: userData.githubId }
+    where: { github_id: userData.githubId }
   });
   
   if (existingUser) {
     // Update last login time
     return await prisma.user.update({
-      where: { githubId: userData.githubId },
+      where: { github_id: userData.githubId },
       data: {
         username: userData.username,
         email: userData.email || existingUser.email,
-        avatarUrl: userData.avatarUrl || existingUser.avatarUrl,
-        updatedAt: new Date()
+        avatar_url: userData.avatarUrl || existingUser.avatar_url,
+        updated_at: new Date()
       }
     });
   }
@@ -33,10 +33,10 @@ export const findOrCreateUser = async (userData: UserData) => {
   // Create new user (default role: analyst)
   return await prisma.user.create({
     data: {
-      githubId: userData.githubId,
+      github_id: userData.githubId,
       username: userData.username,
       email: userData.email,
-      avatarUrl: userData.avatarUrl,
+      avatar_url: userData.avatarUrl,
       role: 'analyst' // Default role
     }
   });
@@ -65,8 +65,8 @@ export const saveRefreshToken = async (userId: number, refreshToken: string) => 
   return await prisma.refreshToken.create({
     data: {
       token: refreshToken,
-      userId: userId,
-      expiresAt: expiresAt
+      user_id: userId,
+      expires_at: expiresAt
     }
   });
 };
@@ -107,7 +107,7 @@ export const revokeRefreshToken = async (refreshToken: string) => {
 
 export const revokeAllUserRefreshTokens = async (userId: number) => {
   await prisma.refreshToken.updateMany({
-    where: { userId: userId },
+    where: { user_id: userId },
     data: { revoked: true }
   });
 };
@@ -119,9 +119,9 @@ export const getUserById = async (userId: number) => {
       id: true,
       username: true,
       email: true,
-      avatarUrl: true,
+      avatar_url: true,
       role: true,
-      createdAt: true
+      created_at: true
     }
   });
 };
@@ -139,14 +139,14 @@ export const getAllUsers = async () => {
       id: true,
       username: true,
       email: true,
-      avatarUrl: true,
+      avatar_url: true,
       role: true,
-      createdAt: true,
+      created_at: true,
       _count: {
         select: { profiles: true }
       }
     },
-    orderBy: { createdAt: 'desc' }
+    orderBy: { created_at: 'desc' }
   });
 };
 

@@ -1,50 +1,46 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import path from 'path';
-import fs from 'fs';
 import profileRoutes from './routes/profile.routes';
+import authRoutes from './routes/auth.routes';
 import { handleError } from './utils/errors';
+import swaggerUi from 'swagger-ui-express';
+import { swaggerSpec } from './config/swagger';
+import cookieParser from 'cookie-parser';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// Resolve Frontend Path
-const publicPath = path.join(__dirname, 'public');
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
 // Middleware
-app.use(cors({ origin: '*' }));
+app.use(cors({
+  origin: FRONTEND_URL,
+  credentials: true,
+}));
 app.use(express.json());
+app.use(cookieParser());
 
-// 1. Static Files (Dashboard)
-app.use(express.static(publicPath));
+// Swagger Docs
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
-// 2. API Routes
+// API Routes
 app.use('/api/profiles', profileRoutes);
+app.use('/api/auth', authRoutes);
 
-// 3. Health API
+// Health API
 app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'success', 
-    db: !!process.env.DATABASE_URL,
-    ui: fs.existsSync(path.join(publicPath, 'index.html'))
-  });
+  res.json({ status: 'success', db: !!process.env.DATABASE_URL });
 });
 
-// 4. UI Catch-all handler
-app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api')) return next();
-  const indexPath = path.join(publicPath, 'index.html');
-  if (fs.existsSync(indexPath)) return res.sendFile(indexPath);
-  res.json({ status: 'success', message: 'API is live. Dashboard loading failed.' });
-});
-
+// Global error handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   handleError(err, res);
 });
 
 app.listen(PORT, () => {
-  console.log(`Intelligence Engine starting on port ${PORT}`);
+  console.log(`Intelligence Engine running on http://localhost:${PORT}`);
+  console.log(`Swagger docs at http://localhost:${PORT}/api/docs`);
+  console.log(`Accepting requests from ${FRONTEND_URL}`);
 });

@@ -1,14 +1,15 @@
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import prisma from '../prisma/schema';
+import { PrismaClient } from '@prisma/client';
 
+const prisma = new PrismaClient();
 export class TokenService {
-  static generateAccessToken(user) {
+  static generateAccessToken(user: any) {
     return jwt.sign(
-      { 
-        userId: user.id, 
-        username: user.username, 
-        role: user.role 
+      {
+        userId: user.id,
+        username: user.username,
+        role: user.role
       },
       process.env.JWT_ACCESS_SECRET,
       { expiresIn: '15m' }
@@ -19,20 +20,20 @@ export class TokenService {
     return crypto.randomBytes(40).toString('hex');
   }
 
-  static async saveRefreshToken(userId, refreshToken) {
+  static async saveRefreshToken(userId: any, refreshToken: any) {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
 
     return await prisma.refreshToken.create({
       data: {
         token: refreshToken,
-        userId: userId,
-        expiresAt: expiresAt
+        user_id: userId,
+        expires_at: expiresAt
       }
     });
   }
 
-  static async verifyRefreshToken(refreshToken) {
+  static async verifyRefreshToken(refreshToken: any) {
     const token = await prisma.refreshToken.findFirst({
       where: {
         token: refreshToken,
@@ -45,29 +46,29 @@ export class TokenService {
         user: true
       }
     });
-    
+
     if (!token) {
       throw new Error('Invalid or expired refresh token');
     }
-    
+
     return token;
   }
 
-  static async revokeRefreshToken(refreshToken) {
+  static async revokeRefreshToken(refreshToken: any) {
     return await prisma.refreshToken.updateMany({
       where: { token: refreshToken },
       data: { revoked: true }
     });
   }
 
-  static async revokeAllUserRefreshTokens(userId) {
+  static async revokeAllUserRefreshTokens(userId: any) {
     return await prisma.refreshToken.updateMany({
-      where: { userId: userId },
+      where: { user_id: userId },
       data: { revoked: true }
     });
   }
 
-  static verifyAccessToken(token) {
+  static verifyAccessToken(token: any) {
     try {
       return jwt.verify(token, process.env.JWT_ACCESS_SECRET);
     } catch (error) {
