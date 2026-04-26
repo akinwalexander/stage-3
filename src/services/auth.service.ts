@@ -16,7 +16,7 @@ export const findOrCreateUser = async (userData: UserData) => {
   const existingUser = await prisma.user.findUnique({
     where: { github_id: userData.githubId }
   });
-  
+
   if (existingUser) {
     // Update last login time
     return await prisma.user.update({
@@ -29,7 +29,7 @@ export const findOrCreateUser = async (userData: UserData) => {
       }
     });
   }
-  
+
   // Create new user (default role: analyst)
   return await prisma.user.create({
     data: {
@@ -44,10 +44,10 @@ export const findOrCreateUser = async (userData: UserData) => {
 
 export const generateAccessToken = (user: any) => {
   return jwt.sign(
-    { 
-      userId: user.id, 
-      username: user.username, 
-      role: user.role 
+    {
+      userId: user.id,
+      username: user.username,
+      role: user.role
     },
     process.env.JWT_ACCESS_SECRET!,
     { expiresIn: '15m' }
@@ -61,7 +61,7 @@ export const generateRefreshToken = () => {
 export const saveRefreshToken = async (userId: number, refreshToken: string) => {
   const expiresAt = new Date();
   expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
-  
+
   return await prisma.refreshToken.create({
     data: {
       token: refreshToken,
@@ -76,7 +76,7 @@ export const verifyRefreshToken = async (refreshToken: string) => {
     where: {
       token: refreshToken,
       revoked: false,
-      expiresAt: {
+      expires_at: {
         gt: new Date()
       }
     },
@@ -84,18 +84,31 @@ export const verifyRefreshToken = async (refreshToken: string) => {
       user: true
     }
   });
-  
+
   if (!token) {
     throw new AppError('Invalid or expired refresh token', 401);
   }
-  
+
   return token;
 };
 
 export const refreshAccessToken = async (refreshToken: string) => {
   const tokenData = await verifyRefreshToken(refreshToken);
+
+  // revoke old token
+  await prisma.refreshToken.update({
+    where: { id: tokenData.id },
+    data: { revoked: true }
+  });
+
+  // issue new refresh token
+  const newRefreshToken = generateRefreshToken();
+  await saveRefreshToken(tokenData.user.id, newRefreshToken);
+
   const newAccessToken = generateAccessToken(tokenData.user);
-  return newAccessToken;
+  await revokeRefreshToken(refreshToken); // revoke old one
+
+  return { newAccessToken, newRefreshToken };
 };
 
 export const revokeRefreshToken = async (refreshToken: string) => {
@@ -155,7 +168,7 @@ export const updateUserRoleAdmin = async (userId: number, role: string, requesti
   if (requestingUserRole !== 'admin') {
     throw new AppError('Only admins can change user roles', 403);
   }
-  
+
   return await prisma.user.update({
     where: { id: userId },
     data: { role: role as 'admin' | 'analyst' }

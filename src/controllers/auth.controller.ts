@@ -4,7 +4,14 @@ import axios from 'axios';
 import * as authService from '../services/auth.service';
 import { AppError, handleError } from '../utils/errors';
 
-const oauthStates = new Map<string, { state: string; codeVerifier: string; client: string }>();
+const oauthStates = new Map<string, {
+  state: string;
+  codeVerifier: string;
+  client: string;
+  redirectUri?: string;
+}>();
+
+// ─── Initiate GitHub Auth ─────────────────────────────────────────────────────
 
 /**
  * @openapi
@@ -19,29 +26,16 @@ const oauthStates = new Map<string, { state: string; codeVerifier: string; clien
  *           type: string
  *           enum: [web, cli]
  *           default: web
- *         description: Client type. CLI returns auth URL as JSON; web redirects to GitHub.
+ *       - in: query
+ *         name: redirect_uri
+ *         schema:
+ *           type: string
+ *         description: CLI local callback URL (e.g. http://localhost:9876/callback)
  *     responses:
  *       200:
- *         description: CLI auth URL returned
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 auth_url:
- *                   type: string
- *                   example: https://github.com/login/oauth/authorize?client_id=...
- *                 session_id:
- *                   type: string
- *                   example: abc123def456
+ *         description: CLI auth URL returned as JSON
  *       302:
  *         description: Web redirect to GitHub OAuth page
- *       500:
- *         description: Internal server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
  */
 export const initiateGithubAuth = async (req: Request, res: Response) => {
   try {
@@ -58,23 +52,11 @@ export const initiateGithubAuth = async (req: Request, res: Response) => {
       .replace(/=+$/, '');
 
     const sessionId = crypto.randomBytes(16).toString('hex');
-    oauthStates.set(sessionId, { state, codeVerifier, client });
+    const redirectUri = req.query.redirect_uri as string | undefined;
 
-    if (client === 'cli') {
-      const authUrl =
-        `https://github.com/login/oauth/authorize?` +
-        `client_id=${process.env.GITHUB_CLIENT_ID}&` +
-        `redirect_uri=${process.env.GITHUB_CALLBACK_URL}&` +
-        `scope=read:user,user:email&` +
-        `state=${state}&` +
-        `code_challenge=${codeChallenge}&` +
-        `code_challenge_method=S256&` +
-        `session_id=${sessionId}`;
+    oauthStates.set(sessionId, { state, codeVerifier, client, redirectUri });
 
-      return res.json({ auth_url: authUrl, session_id: sessionId });
-    }
-
-    // Web: encode sessionId into state so GitHub returns it in callback
+    // Encode sessionId into state so GitHub returns it in the callback
     const combinedState = `${state}:${sessionId}`;
 
     const authUrl =
@@ -86,12 +68,17 @@ export const initiateGithubAuth = async (req: Request, res: Response) => {
       `code_challenge=${codeChallenge}&` +
       `code_challenge_method=S256`;
 
+    if (client === 'cli') {
+      return res.json({ auth_url: authUrl, session_id: sessionId });
+    }
+
     res.redirect(authUrl);
   } catch (error) {
     handleError(error, res);
   }
 };
 
+// ─── GitHub Callback ──────────────────────────────────────────────────────────
 
 /**
  * @openapi
@@ -99,102 +86,32 @@ export const initiateGithubAuth = async (req: Request, res: Response) => {
  *   get:
  *     summary: GitHub OAuth callback
  *     tags: [Authentication]
- *     description: >
- *       Handles the GitHub OAuth redirect. Exchanges the authorization code for tokens.
- *       Web clients receive cookies and are redirected to the dashboard.
- *       CLI clients receive tokens as JSON.
- *     parameters:
- *       - in: query
- *         name: code
- *         required: true
- *         schema:
- *           type: string
- *         description: Authorization code from GitHub
- *       - in: query
- *         name: state
- *         required: true
- *         schema:
- *           type: string
- *         description: State parameter for CSRF validation
- *       - in: query
- *         name: session_id
- *         required: true
- *         schema:
- *           type: string
- *         description: Session ID generated during auth initiation
- *       - in: query
- *         name: client
- *         schema:
- *           type: string
- *           enum: [web, cli]
- *           default: web
- *     responses:
- *       200:
- *         description: CLI login successful — tokens returned as JSON
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 access_token:
- *                   type: string
- *                 refresh_token:
- *                   type: string
- *                 user:
- *                   $ref: '#/components/schemas/User'
- *       302:
- *         description: Web login successful — redirected to dashboard with cookies set
- *       400:
- *         description: Invalid state parameter
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       500:
- *         description: Internal server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
  */
 export const githubCallback = async (req: Request, res: Response) => {
   try {
-    const { code, state: rawState, session_id, client = 'web' } = req.query;
+    const { code, state: rawState } = req.query;
 
-    let oauthData;
-    let receivedState: string;
+    // Decode combined state — "state:sessionId"
+    const parts = (rawState as string).split(':');
+    if (parts.length !== 2) throw new AppError('Invalid state parameter', 400);
 
-    if (session_id) {
-      // CLI flow — session_id comes back as a query param
-      oauthData = oauthStates.get(session_id as string);
-      receivedState = rawState as string;
-      if (!oauthData || oauthData.state !== receivedState) {
-        throw new AppError('Invalid state parameter', 400);
-      }
-    } else {
-      // Web flow — session_id is encoded inside state as "state:sessionId"
-      const parts = (rawState as string).split(':');
-      if (parts.length !== 2) throw new AppError('Invalid state parameter', 400);
-      const [statepart, sessionIdPart] = parts;
-      oauthData = oauthStates.get(sessionIdPart);
-      receivedState = statepart;
-      if (!oauthData || oauthData.state !== receivedState) {
-        throw new AppError('Invalid state parameter', 400);
-      }
-      // Clean up using the extracted sessionId
-      oauthStates.delete(sessionIdPart);
+    const [receivedState, sessionId] = parts;
+    const oauthData = oauthStates.get(sessionId);
+
+    if (!oauthData || oauthData.state !== receivedState) {
+      throw new AppError('Invalid state parameter', 400);
     }
 
+    oauthStates.delete(sessionId);
+
+    // Exchange code for GitHub access token
     const tokenResponse = await axios.post(
       'https://github.com/login/oauth/access_token',
       {
         client_id: process.env.GITHUB_CLIENT_ID,
         client_secret: process.env.GITHUB_CLIENT_SECRET,
         code,
-        redirect_uri: process.env.GITHUB_CALLBACK_URL,
+        redirect_uri: process.env.GITHUB_CALLBACK_URL, // always the registered URL
         code_verifier: oauthData.codeVerifier,
       },
       { headers: { Accept: 'application/json' } }
@@ -202,15 +119,25 @@ export const githubCallback = async (req: Request, res: Response) => {
 
     const githubAccessToken = tokenResponse.data.access_token;
 
+    if (!githubAccessToken) {
+      throw new AppError('Failed to obtain GitHub access token', 400);
+    }
+
     const userResponse = await axios.get('https://api.github.com/user', {
       headers: { Authorization: `Bearer ${githubAccessToken}`, Accept: 'application/json' },
     });
 
-    const emailsResponse = await axios.get('https://api.github.com/user/emails', {
-      headers: { Authorization: `Bearer ${githubAccessToken}`, Accept: 'application/json' },
-    });
+    // Fetch email with fallback to public profile email
+    let primaryEmail: string | undefined;
+    try {
+      const emailsResponse = await axios.get('https://api.github.com/user/emails', {
+        headers: { Authorization: `Bearer ${githubAccessToken}`, Accept: 'application/json' },
+      });
+      primaryEmail = emailsResponse.data.find((e: any) => e.primary)?.email;
+    } catch {
+      primaryEmail = userResponse.data.email;
+    }
 
-    const primaryEmail = emailsResponse.data.find((email: any) => email.primary)?.email;
     const githubUser = { ...userResponse.data, email: primaryEmail };
 
     const user = await authService.findOrCreateUser({
@@ -224,24 +151,42 @@ export const githubCallback = async (req: Request, res: Response) => {
     const refreshToken = authService.generateRefreshToken();
     await authService.saveRefreshToken(user.id, refreshToken);
 
-    // CLI cleanup
-    if (session_id) oauthStates.delete(session_id as string);
-
-    if (client === 'cli' || oauthData.client === 'cli') {
-      return res.json({
-        success: true,
-        access_token: accessToken,
-        refresh_token: refreshToken,
-        user: {
-          id: user.id,
-          username: user.username,
-          email: user.email,
-          avatar_url: user.avatar_url,
-          role: user.role,
-        },
-      });
+    // ── CLI: redirect to local callback server with tokens in query params ──
+    if (oauthData.client === 'cli') {
+      const cliCallback = oauthData.redirectUri || 'http://localhost:9876/callback';
+      return res.redirect(
+        `${cliCallback}?access_token=${accessToken}` +
+        `&refresh_token=${refreshToken}` +
+        `&username=${encodeURIComponent(user.username)}` +
+        `&role=${user.role}` +
+        `&email=${encodeURIComponent(user.email || '')}`
+      );
     }
 
+    // ── Web: set HTTP-only cookies + CSRF token ──
+    const csrfToken = crypto.randomBytes(32).toString('hex');
+
+    res.cookie('access_token', accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',   // ← change from 'none'
+      maxAge: 15 * 60 * 1000,         // 15 minutes
+    });
+
+    res.cookie('refresh_token', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',   // ← change from 'none'
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
+    // CSRF token is readable by JS (not httpOnly) so the frontend can send it as a header
+    res.cookie('csrf_token', csrfToken, {
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 15 * 60 * 1000,
+    });
     res.redirect(
       `${process.env.FRONTEND_URL || 'http://localhost:5173'}/?token=${accessToken}&refresh_token=${refreshToken}`
     );
@@ -250,59 +195,68 @@ export const githubCallback = async (req: Request, res: Response) => {
     handleError(error, res);
   }
 };
+
+// ─── Refresh Token ────────────────────────────────────────────────────────────
+
 /**
  * @openapi
  * /auth/refresh:
  *   post:
  *     summary: Refresh access token
  *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - refresh_token
- *             properties:
- *               refresh_token:
- *                 type: string
- *                 example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
- *     responses:
- *       200:
- *         description: New access token issued
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 access_token:
- *                   type: string
- *       400:
- *         description: Refresh token missing or invalid
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
  */
 export const refreshToken = async (req: Request, res: Response) => {
   try {
-    const { refresh_token } = req.body;
+    // Accept refresh token from body (CLI) or cookie (web)
+    const refresh_token = req.cookies?.refresh_token || req.body?.refresh_token;
 
     if (!refresh_token) {
       throw new AppError('Refresh token required', 400);
     }
 
-    const newAccessToken = await authService.refreshAccessToken(refresh_token);
+    const { newAccessToken, newRefreshToken } =
+      await authService.refreshAccessToken(refresh_token);
 
-    res.json({ success: true, access_token: newAccessToken });
+    // For web clients — update the cookie
+    if (req.cookies?.refresh_token) {
+      const csrfToken = crypto.randomBytes(32).toString('hex');
+
+      // Access token
+      res.cookie('access_token', newAccessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 15 * 60 * 1000,
+      });
+
+      // NEW refresh token
+      res.cookie('refresh_token', newRefreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+      });
+
+      // CSRF token
+      res.cookie('csrf_token', csrfToken, {
+        httpOnly: false,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 15 * 60 * 1000,
+      });
+
+      return res.json({ success: true, csrf_token: csrfToken });
+    }
+
+    // For CLI clients — return token in body
+    res.json({ success: true, access_token: newAccessToken, refresh_token: newRefreshToken });
   } catch (error) {
+    console.error("REFRESH ERROR 🔥:", error);
     handleError(error, res);
   }
 };
+
+// ─── Logout ───────────────────────────────────────────────────────────────────
 
 /**
  * @openapi
@@ -310,40 +264,10 @@ export const refreshToken = async (req: Request, res: Response) => {
  *   post:
  *     summary: Logout and revoke tokens
  *     tags: [Authentication]
- *     requestBody:
- *       required: false
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               refresh_token:
- *                 type: string
- *                 description: Optional — if provided, the refresh token is revoked server-side
- *     responses:
- *       200:
- *         description: Logged out successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: Logged out successfully
- *       500:
- *         description: Internal server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
  */
 export const logout = async (req: Request, res: Response) => {
   try {
-    const { refresh_token } = req.body;
+    const refresh_token = req.body.refresh_token || req.cookies?.refresh_token;
 
     if (refresh_token) {
       await authService.revokeRefreshToken(refresh_token);
@@ -351,12 +275,15 @@ export const logout = async (req: Request, res: Response) => {
 
     res.clearCookie('access_token');
     res.clearCookie('refresh_token');
+    res.clearCookie('csrf_token');
 
     res.json({ success: true, message: 'Logged out successfully' });
   } catch (error) {
     handleError(error, res);
   }
 };
+
+// ─── Get Current User ─────────────────────────────────────────────────────────
 
 /**
  * @openapi
@@ -367,25 +294,6 @@ export const logout = async (req: Request, res: Response) => {
  *     security:
  *       - bearerAuth: []
  *       - cookieAuth: []
- *     responses:
- *       200:
- *         description: Current user profile
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   $ref: '#/components/schemas/User'
- *       401:
- *         description: Not authenticated
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
  */
 export const getCurrentUser = async (req: Request, res: Response) => {
   try {
@@ -411,6 +319,8 @@ export const getCurrentUser = async (req: Request, res: Response) => {
   }
 };
 
+// ─── Switch Role ──────────────────────────────────────────────────────────────
+
 /**
  * @openapi
  * /auth/switch-role:
@@ -419,66 +329,6 @@ export const getCurrentUser = async (req: Request, res: Response) => {
  *     tags: [Authentication]
  *     security:
  *       - bearerAuth: []
- *       - cookieAuth: []
- *     description: >
- *       Allows a user to switch their active role. Admins may switch to analyst.
- *       Analysts cannot switch to admin.
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - role
- *             properties:
- *               role:
- *                 type: string
- *                 enum: [admin, analyst]
- *                 example: analyst
- *     responses:
- *       200:
- *         description: Role switched — new access token issued
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 access_token:
- *                   type: string
- *                 user:
- *                   type: object
- *                   properties:
- *                     id:
- *                       type: integer
- *                     username:
- *                       type: string
- *                     role:
- *                       type: string
- *                 message:
- *                   type: string
- *                   example: Switched to analyst role
- *       400:
- *         description: Invalid role value
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       401:
- *         description: Not authenticated
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       403:
- *         description: Insufficient permissions to switch to requested role
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
  */
 export const switchRole = async (req: Request, res: Response) => {
   try {

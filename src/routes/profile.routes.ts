@@ -11,6 +11,7 @@ router.use(authenticate);
 router.get('/', requireReadAccess, profileController.getAllProfiles);
 router.get('/search', requireReadAccess, profileController.searchProfiles);
 router.get('/stats', requireReadAccess, profileController.getProfileStats);
+router.get('/export', requireAdmin, profileController.exportProfiles);
 router.get('/:id', requireReadAccess, profileController.getProfileById);
 
 // Write operations (Admin only)

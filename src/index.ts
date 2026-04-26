@@ -7,6 +7,8 @@ import { handleError } from './utils/errors';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './config/swagger';
 import cookieParser from 'cookie-parser';
+import morgan from 'morgan';
+import rateLimit from 'express-rate-limit';
 
 dotenv.config();
 
@@ -21,13 +23,39 @@ app.use(cors({
 }));
 app.use(express.json());
 app.use(cookieParser());
+app.use(morgan('combined'));
+
+
+// ─── Rate Limiting ────────────────────────────────────────────────────────────
+
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,           // 15 minutes
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { status: 'error', message: 'Too many requests, please try again later.' },
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  skip: (req) => req.path.includes('/callback'),                         // stricter limit on auth endpoints
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { status: 'error', message: 'Too many auth attempts, please try again later.' },
+});
+
+// Apply rate limiters BEFORE routes
+app.use('/api/', globalLimiter);
+app.use('/api/v1/auth', authLimiter);
+
 
 // Swagger Docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // API Routes
-app.use('/api/profiles', profileRoutes);
-app.use('/api/auth', authRoutes);
+app.use('/api/v1/profiles', profileRoutes);
+app.use('/api/v1/auth', authRoutes);
 
 // Health API
 app.get('/api/health', (req, res) => {
