@@ -16,20 +16,32 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
-// Middleware
+const allowedOrigins = [
+  FRONTEND_URL,
+  'http://localhost:5173',
+  'http://localhost:3000',
+];
+
+// ─── Middleware ───────────────────────────────────────────────────────────────
+
 app.use(cors({
-  origin: FRONTEND_URL,
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
 }));
 app.use(express.json());
 app.use(cookieParser());
 app.use(morgan('combined'));
 
-
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 
 const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,           // 15 minutes
+  windowMs: 15 * 60 * 1000,
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
@@ -39,36 +51,57 @@ const globalLimiter = rateLimit({
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
-  skip: (req) => req.path.includes('/callback'),                         // stricter limit on auth endpoints
+  skip: (req) => req.path.includes('/callback'),
   standardHeaders: true,
   legacyHeaders: false,
   message: { status: 'error', message: 'Too many auth attempts, please try again later.' },
 });
 
-// Apply rate limiters BEFORE routes
 app.use('/api/', globalLimiter);
 app.use('/api/v1/auth', authLimiter);
 
+// ─── Swagger Docs ─────────────────────────────────────────────────────────────
 
-// Swagger Docs
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
-// API Routes
+// ─── API Routes ───────────────────────────────────────────────────────────────
+
 app.use('/api/v1/profiles', profileRoutes);
 app.use('/api/v1/auth', authRoutes);
 
-// Health API
+// ─── Health ───────────────────────────────────────────────────────────────────
+
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'success', db: !!process.env.DATABASE_URL });
+  res.json({
+    status: 'success',
+    db: !!process.env.DATABASE_URL,
+    timestamp: new Date().toISOString(),
+  });
 });
 
-// Global error handler
+// ─── Global Error Handler ─────────────────────────────────────────────────────
+
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   handleError(err, res);
 });
+
+// ─── Start Server ─────────────────────────────────────────────────────────────
 
 app.listen(PORT, () => {
   console.log(`Intelligence Engine running on http://localhost:${PORT}`);
   console.log(`Swagger docs at http://localhost:${PORT}/api/docs`);
   console.log(`Accepting requests from ${FRONTEND_URL}`);
+
+  // Keep alive — ping self every 14 minutes to prevent Render free tier sleep
+  const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
+  if (RENDER_URL && process.env.NODE_ENV === 'production') {
+    setInterval(async () => {
+      try {
+        await fetch(`${RENDER_URL}/api/health`);
+        console.log('Keep-alive ping sent');
+      } catch (err) {
+        console.error('Keep-alive ping failed:', err);
+      }
+    }, 14 * 60 * 1000);
+  }
 });
