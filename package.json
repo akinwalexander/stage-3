@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
-    "build": "tsc && cd frontend && npm install && npm run build && cd .. && node -e \"const fs=require('fs'); const path=require('path'); const dest='src/public'; if(!fs.existsSync(dest)){fs.mkdirSync(dest, {recursive:true})}; const cp=(s,d)=>{if(fs.statSync(s).isDirectory()){if(!fs.existsSync(d)){fs.mkdirSync(d)}; fs.readdirSync(s).forEach(f=>cp(path.join(s,f),path.join(d,f)))}else{fs.copyFileSync(s,d)}}; cp('frontend/dist', dest)\"",
+    "build": "tsc",
     "postinstall": "prisma generate",
     "seed": "ts-node prisma/seed.ts",
     "test": "echo \"Error: no test specified\" && exit 1"

@@ -56,6 +56,9 @@ export const initiateGithubAuth = async (req: Request, res: Response) => {
 
     oauthStates.set(sessionId, { state, codeVerifier, client, redirectUri });
 
+    setInterval(() => {
+    }, 5 * 60 * 1000);
+
     // Encode sessionId into state so GitHub returns it in the callback
     const combinedState = `${state}:${sessionId}`;
 
