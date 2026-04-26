@@ -2,7 +2,7 @@ services:
   - type: web
     name: insighta-backend
     env: node
-    buildCommand: npm install && npx prisma generate && npm run build && ls dist/ && npx prisma db push && node dist/prisma/seed.js
+    buildCommand: npm install && npx prisma generate && npm run build && npx prisma db push && npx ts-node prisma/seed.ts
     startCommand: node dist/index.js
     healthCheckPath: /api/health
     envVars:
