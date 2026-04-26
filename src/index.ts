@@ -38,6 +38,22 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(morgan('combined'));
 
+// ─── API Versioning Header ────────────────────────────────────────────────────
+
+app.use('/api', (req, res, next) => {
+  res.setHeader('X-API-Version', '1.0.0');
+
+  const requestedVersion = req.headers['accept-version'] || req.headers['x-api-version'];
+  if (requestedVersion && requestedVersion !== '1.0.0' && requestedVersion !== '1') {
+    return res.status(400).json({
+      status: 'error',
+      message: `API version ${requestedVersion} is not supported. Use version 1.0.0`,
+    });
+  }
+
+  next();
+});
+
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 
 const globalLimiter = rateLimit({
@@ -50,7 +66,7 @@ const globalLimiter = rateLimit({
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: 10,
   skip: (req) => req.path.includes('/callback'),
   standardHeaders: true,
   legacyHeaders: false,
@@ -58,7 +74,7 @@ const authLimiter = rateLimit({
 });
 
 app.use('/api/', globalLimiter);
-app.use('/api/v1/auth', authLimiter);
+app.use('/api/auth', authLimiter);
 
 // ─── Swagger Docs ─────────────────────────────────────────────────────────────
 
@@ -66,8 +82,9 @@ app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // ─── API Routes ───────────────────────────────────────────────────────────────
 
-app.use('/api/v1/profiles', profileRoutes);
-app.use('/api/v1/auth', authRoutes);
+app.use('/api/profiles', profileRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/users', authRoutes);
 
 // ─── Health ───────────────────────────────────────────────────────────────────
 
@@ -92,7 +109,6 @@ app.listen(PORT, () => {
   console.log(`Swagger docs at http://localhost:${PORT}/api/docs`);
   console.log(`Accepting requests from ${FRONTEND_URL}`);
 
-  // Keep alive — ping self every 14 minutes to prevent Render free tier sleep
   const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
   if (RENDER_URL && process.env.NODE_ENV === 'production') {
     setInterval(async () => {

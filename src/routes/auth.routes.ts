@@ -12,6 +12,7 @@ router.post('/logout', authController.logout);
 
 // Protected routes
 router.get('/me', authenticate, authController.getCurrentUser);
+router.get('/users/me', authenticate, authController.getCurrentUser); // alias
 router.post('/me/switch-role', authenticate, authController.switchRole); // For users with multiple roles
 
 export default router;

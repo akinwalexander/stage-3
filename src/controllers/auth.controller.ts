@@ -94,7 +94,16 @@ export const githubCallback = async (req: Request, res: Response) => {
   try {
     const { code, state: rawState } = req.query;
 
-    // Decode combined state — "state:sessionId"
+    // Reject missing code
+    if (!code) {
+      throw new AppError('Missing authorization code', 400);
+    }
+
+    // Reject missing state
+    if (!rawState) {
+      throw new AppError('Missing state parameter', 400);
+    }
+
     const parts = (rawState as string).split(':');
     if (parts.length !== 2) throw new AppError('Invalid state parameter', 400);
 
